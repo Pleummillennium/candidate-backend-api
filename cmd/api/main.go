@@ -57,6 +57,9 @@ func main() {
 	// Setup router
 	router := gin.Default()
 
+	// Apply CORS middleware (must be before other routes)
+	router.Use(middleware.CORSMiddleware())
+
 	// Apply rate limiting to all routes
 	router.Use(middleware.RateLimitMiddleware())
 
