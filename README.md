@@ -5,7 +5,8 @@ Task management system with user authentication, task cards, comments, and chang
 ## Features
 
 - User authentication with JWT
-- Task/Card management (Create, Read, Update, Delete)
+- Task/Card management (Create, Read, Update, Delete, Archive)
+- Task archiving system (Archive/Unarchive with separate views)
 - Comment system with ownership validation
 - Change log tracking
 - Rate limiting (100 requests per minute)
@@ -15,7 +16,7 @@ Task management system with user authentication, task cards, comments, and chang
 
 ## Tech Stack
 
-- **Language**: Go 1.21
+- **Language**: Go 1.24
 - **Framework**: Gin
 - **Database**: PostgreSQL 16
 - **Authentication**: JWT
@@ -72,14 +73,14 @@ Task management system with user authentication, task cards, comments, and chang
 ## Prerequisites
 
 - Docker and Docker Compose installed
-- OR Go 1.21+ and PostgreSQL 16+ (for local development)
+- OR Go 1.24+ and PostgreSQL 16+ (for local development)
 
 ## Quick Start with Docker
 
 1. Clone the repository:
 ```bash
 git clone <repository-url>
-cd candidate-backend
+cd candidate-backend-api
 ```
 
 2. Start the services:
@@ -183,10 +184,23 @@ All protected endpoints require the `Authorization` header:
 Authorization: Bearer <your-jwt-token>
 ```
 
-#### Get all tasks
+#### Get all tasks (non-archived)
 ```
 GET /api/tasks
 ```
+
+Query Parameters (optional):
+- `limit` (integer): Number of tasks per page (default: 10)
+- `offset` (integer): Number of tasks to skip (default: 0)
+
+#### Get archived tasks
+```
+GET /api/tasks/archived
+```
+
+Query Parameters (optional):
+- `limit` (integer): Number of tasks per page (default: 10)
+- `offset` (integer): Number of tasks to skip (default: 0)
 
 #### Get a specific task
 ```
@@ -227,6 +241,20 @@ DELETE /api/tasks/:id
 ```
 
 Note: Only the task creator can delete the task.
+
+#### Archive a task
+```
+POST /api/tasks/:id/archive
+```
+
+Archives a task (soft delete). Only the task creator can archive the task.
+
+#### Unarchive a task
+```
+POST /api/tasks/:id/unarchive
+```
+
+Restores an archived task. Only the task creator can unarchive the task.
 
 #### Get task change logs
 ```
@@ -277,9 +305,9 @@ GET /health
 ## Authorization Rules
 
 1. **Tasks**:
-   - Any authenticated user can view all tasks
+   - Any authenticated user can view all tasks (archived and non-archived)
    - Any authenticated user can create tasks
-   - Only the task creator can update or delete their tasks
+   - Only the task creator can update, delete, archive, or unarchive their tasks
 
 2. **Comments**:
    - Any authenticated user can view comments
@@ -311,6 +339,7 @@ GET /health
 - status (To Do | In Progress | Done)
 - creator_id (Foreign Key -> users.id)
 - due_date
+- archived (Boolean, default: false)
 - created_at
 - updated_at
 
@@ -365,9 +394,27 @@ curl -X POST http://localhost:8080/api/tasks \
   }'
 ```
 
-### Get all tasks:
+### Get all tasks (non-archived):
 ```bash
 curl -X GET http://localhost:8080/api/tasks \
+  -H "Authorization: Bearer TOKEN"
+```
+
+### Get archived tasks:
+```bash
+curl -X GET http://localhost:8080/api/tasks/archived \
+  -H "Authorization: Bearer TOKEN"
+```
+
+### Archive a task:
+```bash
+curl -X POST http://localhost:8080/api/tasks/1/archive \
+  -H "Authorization: Bearer TOKEN"
+```
+
+### Unarchive a task:
+```bash
+curl -X POST http://localhost:8080/api/tasks/1/unarchive \
   -H "Authorization: Bearer TOKEN"
 ```
 
