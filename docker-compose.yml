@@ -1,0 +1,50 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  db:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.db
+    container_name: candidate-db
+    environment:
+      POSTGRES_DB: candidate_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - candidate-network
+
+  # API Service
+  api:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.api
+    container_name: candidate-api
+    environment:
+      DATABASE_URL: postgres://postgres:postgres@db:5432/candidate_db?sslmode=disable
+      JWT_SECRET: your-secret-key-change-this-in-production
+      PORT: 8080
+    ports:
+      - "8080:8080"
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - candidate-network
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+
+networks:
+  candidate-network:
+    driver: bridge
