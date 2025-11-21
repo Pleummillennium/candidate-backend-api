@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"fmt"
 	"net/http"
+	"strconv"
 
 	"github.com/gin-gonic/gin"
 )
@@ -18,6 +19,19 @@ func NewCommentHandler(db *sql.DB) *CommentHandler {
 	return &CommentHandler{db: db}
 }
 
+// GetComments godoc
+// @Summary      Get task comments
+// @Description  Retrieve all comments for a specific task
+// @Tags         Comments
+// @Accept       json
+// @Produce      json
+// @Security     Bearer
+// @Param        id   path      int  true  "Task ID"
+// @Success      200  {array}   models.Comment
+// @Failure      401  {object}  map[string]string
+// @Failure      404  {object}  map[string]string
+// @Failure      500  {object}  map[string]string
+// @Router       /api/tasks/{id}/comments [get]
 func (h *CommentHandler) GetComments(c *gin.Context) {
 	taskID := c.Param("id")
 
@@ -64,6 +78,21 @@ func (h *CommentHandler) GetComments(c *gin.Context) {
 	c.JSON(http.StatusOK, comments)
 }
 
+// CreateComment godoc
+// @Summary      Create a comment
+// @Description  Add a new comment to a task
+// @Tags         Comments
+// @Accept       json
+// @Produce      json
+// @Security     Bearer
+// @Param        id       path      int                          true  "Task ID"
+// @Param        comment  body      models.CreateCommentRequest  true  "Comment data"
+// @Success      201      {object}  models.Comment
+// @Failure      400      {object}  map[string]string
+// @Failure      401      {object}  map[string]string
+// @Failure      404      {object}  map[string]string
+// @Failure      500      {object}  map[string]string
+// @Router       /api/tasks/{id}/comments [post]
 func (h *CommentHandler) CreateComment(c *gin.Context) {
 	taskID := c.Param("id")
 	userID, _ := middleware.GetUserID(c)
@@ -98,11 +127,28 @@ func (h *CommentHandler) CreateComment(c *gin.Context) {
 	}
 
 	// Log the comment creation
-	h.createChangeLog(atoi(taskID), userID, "commented", fmt.Sprintf("Added a comment"))
+	taskIDInt, _ := strconv.Atoi(taskID)
+	h.createChangeLog(taskIDInt, userID, "commented", fmt.Sprintf("Added a comment"))
 
 	c.JSON(http.StatusCreated, comment)
 }
 
+// UpdateComment godoc
+// @Summary      Update a comment
+// @Description  Update comment content (only the comment creator can update)
+// @Tags         Comments
+// @Accept       json
+// @Produce      json
+// @Security     Bearer
+// @Param        id       path      int                          true  "Comment ID"
+// @Param        comment  body      models.UpdateCommentRequest  true  "Updated comment data"
+// @Success      200      {object}  models.Comment
+// @Failure      400      {object}  map[string]string
+// @Failure      401      {object}  map[string]string
+// @Failure      403      {object}  map[string]string
+// @Failure      404      {object}  map[string]string
+// @Failure      500      {object}  map[string]string
+// @Router       /api/comments/{id} [put]
 func (h *CommentHandler) UpdateComment(c *gin.Context) {
 	commentID := c.Param("id")
 	userID, _ := middleware.GetUserID(c)
@@ -159,6 +205,20 @@ func (h *CommentHandler) UpdateComment(c *gin.Context) {
 	c.JSON(http.StatusOK, comment)
 }
 
+// DeleteComment godoc
+// @Summary      Delete a comment
+// @Description  Delete a comment (only the comment creator can delete)
+// @Tags         Comments
+// @Accept       json
+// @Produce      json
+// @Security     Bearer
+// @Param        id   path      int  true  "Comment ID"
+// @Success      200  {object}  map[string]string
+// @Failure      401  {object}  map[string]string
+// @Failure      403  {object}  map[string]string
+// @Failure      404  {object}  map[string]string
+// @Failure      500  {object}  map[string]string
+// @Router       /api/comments/{id} [delete]
 func (h *CommentHandler) DeleteComment(c *gin.Context) {
 	commentID := c.Param("id")
 	userID, _ := middleware.GetUserID(c)

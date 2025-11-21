@@ -3,6 +3,7 @@ package handlers
 import (
 	"candidate-backend/internal/middleware"
 	"candidate-backend/internal/models"
+	"candidate-backend/internal/services"
 	"database/sql"
 	"fmt"
 	"net/http"
@@ -12,143 +13,153 @@ import (
 )
 
 type TaskHandler struct {
-	db *sql.DB
+	taskService      *services.TaskService
+	archiveService   *services.TaskArchiveService
+	changeLogService *services.ChangeLogService
 }
 
 func NewTaskHandler(db *sql.DB) *TaskHandler {
-	return &TaskHandler{db: db}
+	return &TaskHandler{
+		taskService:      services.NewTaskService(db),
+		archiveService:   services.NewTaskArchiveService(db),
+		changeLogService: services.NewChangeLogService(db),
+	}
 }
 
 // GetTasks godoc
 // @Summary      Get all tasks
-// @Description  Retrieve all tasks with creator information
+// @Description  Retrieve all non-archived tasks with creator information (supports pagination)
 // @Tags         Tasks
 // @Accept       json
 // @Produce      json
 // @Security     Bearer
+// @Param        limit   query     int  false  "Limit number of results (default: 10)"
+// @Param        offset  query     int  false  "Offset for pagination (default: 0)"
 // @Success      200  {array}   models.Task
 // @Failure      401  {object}  map[string]string
 // @Failure      500  {object}  map[string]string
 // @Router       /api/tasks [get]
 func (h *TaskHandler) GetTasks(c *gin.Context) {
-	rows, err := h.db.Query(`
-		SELECT t.id, t.title, t.description, t.status, t.creator_id,
-		       u.name as creator_name, t.due_date, t.created_at, t.updated_at
-		FROM tasks t
-		JOIN users u ON t.creator_id = u.id
-		ORDER BY t.created_at DESC
-	`)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch tasks"})
-		return
-	}
-	defer rows.Close()
+	// Get pagination params
+	limit := 10
+	offset := 0
 
-	var tasks []models.Task
-	for rows.Next() {
-		var task models.Task
-		err := rows.Scan(
-			&task.ID, &task.Title, &task.Description, &task.Status,
-			&task.CreatorID, &task.CreatorName, &task.DueDate,
-			&task.CreatedAt, &task.UpdatedAt,
-		)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to scan task"})
-			return
+	if limitStr := c.Query("limit"); limitStr != "" {
+		if l, err := strconv.Atoi(limitStr); err == nil && l > 0 {
+			limit = l
 		}
-		tasks = append(tasks, task)
 	}
 
-	if tasks == nil {
-		tasks = []models.Task{}
+	if offsetStr := c.Query("offset"); offsetStr != "" {
+		if o, err := strconv.Atoi(offsetStr); err == nil && o >= 0 {
+			offset = o
+		}
+	}
+
+	tasks, err := h.taskService.GetTasks(limit, offset)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
 	}
 
 	c.JSON(http.StatusOK, tasks)
 }
 
+// GetTask godoc
+// @Summary      Get task by ID
+// @Description  Retrieve a specific task by its ID
+// @Tags         Tasks
+// @Accept       json
+// @Produce      json
+// @Security     Bearer
+// @Param        id   path      int  true  "Task ID"
+// @Success      200  {object}  models.Task
+// @Failure      401  {object}  map[string]string
+// @Failure      404  {object}  map[string]string
+// @Failure      500  {object}  map[string]string
+// @Router       /api/tasks/{id} [get]
 func (h *TaskHandler) GetTask(c *gin.Context) {
 	taskID := c.Param("id")
 
-	var task models.Task
-	err := h.db.QueryRow(`
-		SELECT t.id, t.title, t.description, t.status, t.creator_id,
-		       u.name as creator_name, t.due_date, t.created_at, t.updated_at
-		FROM tasks t
-		JOIN users u ON t.creator_id = u.id
-		WHERE t.id = $1
-	`, taskID).Scan(
-		&task.ID, &task.Title, &task.Description, &task.Status,
-		&task.CreatorID, &task.CreatorName, &task.DueDate,
-		&task.CreatedAt, &task.UpdatedAt,
-	)
-
+	task, err := h.taskService.GetTask(taskID)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			c.JSON(http.StatusNotFound, gin.H{"error": "Task not found"})
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch task"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
 	c.JSON(http.StatusOK, task)
 }
 
+// CreateTask godoc
+// @Summary      Create a new task
+// @Description  Create a new task with title, description, and status
+// @Tags         Tasks
+// @Accept       json
+// @Produce      json
+// @Security     Bearer
+// @Param        task  body      models.CreateTaskRequest  true  "Task data"
+// @Success      201   {object}  models.Task
+// @Failure      400   {object}  map[string]string
+// @Failure      401   {object}  map[string]string
+// @Failure      500   {object}  map[string]string
+// @Router       /api/tasks [post]
 func (h *TaskHandler) CreateTask(c *gin.Context) {
 	userID, _ := middleware.GetUserID(c)
 
-	var req models.CreateTaskRequest
+	var req struct {
+		Title       string `json:"title" binding:"required"`
+		Description string `json:"description"`
+		Status      string `json:"status"`
+		DueDate     *string `json:"due_date"`
+	}
+
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
-	// Set default status if not provided
-	if req.Status == "" {
-		req.Status = models.StatusToDo
+	// Convert to service request
+	createReq := models.CreateTaskRequest{
+		Title:       req.Title,
+		Description: req.Description,
+		Status:      models.TaskStatus(req.Status),
 	}
 
-	var task models.Task
-	err := h.db.QueryRow(`
-		INSERT INTO tasks (title, description, status, creator_id, due_date)
-		VALUES ($1, $2, $3, $4, $5)
-		RETURNING id, title, description, status, creator_id, due_date, created_at, updated_at
-	`, req.Title, req.Description, req.Status, userID, req.DueDate).Scan(
-		&task.ID, &task.Title, &task.Description, &task.Status,
-		&task.CreatorID, &task.DueDate, &task.CreatedAt, &task.UpdatedAt,
-	)
-
+	task, err := h.taskService.CreateTask(createReq, userID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create task"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
 	// Log the creation
-	h.createChangeLog(task.ID, userID, "created", fmt.Sprintf("Created task: %s", task.Title))
+	h.changeLogService.CreateChangeLog(task.ID, userID, "created", fmt.Sprintf("Created task: %s", task.Title))
 
 	c.JSON(http.StatusCreated, task)
 }
 
+// UpdateTask godoc
+// @Summary      Update a task
+// @Description  Update task information (only the creator can update)
+// @Tags         Tasks
+// @Accept       json
+// @Produce      json
+// @Security     Bearer
+// @Param        id    path      int                      true  "Task ID"
+// @Param        task  body      models.UpdateTaskRequest  true  "Updated task data"
+// @Success      200   {object}  models.Task
+// @Failure      400   {object}  map[string]string
+// @Failure      401   {object}  map[string]string
+// @Failure      403   {object}  map[string]string
+// @Failure      404   {object}  map[string]string
+// @Failure      500   {object}  map[string]string
+// @Router       /api/tasks/{id} [put]
 func (h *TaskHandler) UpdateTask(c *gin.Context) {
 	taskID := c.Param("id")
 	userID, _ := middleware.GetUserID(c)
-
-	// Check if user is the creator
-	var creatorID int
-	err := h.db.QueryRow("SELECT creator_id FROM tasks WHERE id = $1", taskID).Scan(&creatorID)
-	if err != nil {
-		if err == sql.ErrNoRows {
-			c.JSON(http.StatusNotFound, gin.H{"error": "Task not found"})
-			return
-		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Database error"})
-		return
-	}
-
-	if creatorID != userID {
-		c.JSON(http.StatusForbidden, gin.H{"error": "You can only update your own tasks"})
-		return
-	}
 
 	var req models.UpdateTaskRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -156,148 +167,204 @@ func (h *TaskHandler) UpdateTask(c *gin.Context) {
 		return
 	}
 
-	// Build dynamic update query
-	query := "UPDATE tasks SET "
-	args := []interface{}{}
-	argCount := 1
-	changes := []string{}
-
-	if req.Title != nil {
-		query += fmt.Sprintf("title = $%d, ", argCount)
-		args = append(args, *req.Title)
-		argCount++
-		changes = append(changes, fmt.Sprintf("title to '%s'", *req.Title))
-	}
-	if req.Description != nil {
-		query += fmt.Sprintf("description = $%d, ", argCount)
-		args = append(args, *req.Description)
-		argCount++
-	}
-	if req.Status != nil {
-		query += fmt.Sprintf("status = $%d, ", argCount)
-		args = append(args, *req.Status)
-		argCount++
-		changes = append(changes, fmt.Sprintf("status to '%s'", *req.Status))
-	}
-	if req.DueDate != nil {
-		query += fmt.Sprintf("due_date = $%d, ", argCount)
-		args = append(args, req.DueDate)
-		argCount++
-	}
-
-	if len(args) == 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "No fields to update"})
-		return
-	}
-
-	query += fmt.Sprintf("updated_at = CURRENT_TIMESTAMP WHERE id = $%d", argCount)
-	args = append(args, taskID)
-
-	query += " RETURNING id, title, description, status, creator_id, due_date, created_at, updated_at"
-
-	var task models.Task
-	err = h.db.QueryRow(query, args...).Scan(
-		&task.ID, &task.Title, &task.Description, &task.Status,
-		&task.CreatorID, &task.DueDate, &task.CreatedAt, &task.UpdatedAt,
-	)
-
+	task, changes, err := h.taskService.UpdateTask(taskID, req, userID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update task"})
+		if err.Error() == "task not found" {
+			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+			return
+		}
+		if err.Error() == "you can only modify your own tasks" {
+			c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
 	// Log the update
 	if len(changes) > 0 {
-		changeDetails := fmt.Sprintf("Updated %s", changes[0])
-		for i := 1; i < len(changes); i++ {
-			changeDetails += fmt.Sprintf(", %s", changes[i])
-		}
-		h.createChangeLog(task.ID, userID, "updated", changeDetails)
+		changeDetails := h.changeLogService.FormatChangeDetails(changes)
+		h.changeLogService.CreateChangeLog(task.ID, userID, "updated", changeDetails)
 	}
 
 	c.JSON(http.StatusOK, task)
 }
 
+// DeleteTask godoc
+// @Summary      Delete a task
+// @Description  Delete a task (only the creator can delete)
+// @Tags         Tasks
+// @Accept       json
+// @Produce      json
+// @Security     Bearer
+// @Param        id   path      int  true  "Task ID"
+// @Success      200  {object}  map[string]string
+// @Failure      401  {object}  map[string]string
+// @Failure      403  {object}  map[string]string
+// @Failure      404  {object}  map[string]string
+// @Failure      500  {object}  map[string]string
+// @Router       /api/tasks/{id} [delete]
 func (h *TaskHandler) DeleteTask(c *gin.Context) {
 	taskID := c.Param("id")
 	userID, _ := middleware.GetUserID(c)
 
-	// Check if user is the creator
-	var creatorID int
-	var title string
-	err := h.db.QueryRow("SELECT creator_id, title FROM tasks WHERE id = $1", taskID).Scan(&creatorID, &title)
+	taskIDInt, _ := strconv.Atoi(taskID)
+
+	title, err := h.taskService.DeleteTask(taskID, userID)
 	if err != nil {
-		if err == sql.ErrNoRows {
+		if err == sql.ErrNoRows || err.Error() == "task not found" {
 			c.JSON(http.StatusNotFound, gin.H{"error": "Task not found"})
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Database error"})
-		return
-	}
-
-	if creatorID != userID {
-		c.JSON(http.StatusForbidden, gin.H{"error": "You can only delete your own tasks"})
+		if err.Error() == "you can only delete your own tasks" {
+			c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
 	// Log before deletion (because of CASCADE)
-	h.createChangeLog(atoi(taskID), userID, "deleted", fmt.Sprintf("Deleted task: %s", title))
-
-	_, err = h.db.Exec("DELETE FROM tasks WHERE id = $1", taskID)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete task"})
-		return
-	}
+	h.changeLogService.CreateChangeLog(taskIDInt, userID, "deleted", fmt.Sprintf("Deleted task: %s", title))
 
 	c.JSON(http.StatusOK, gin.H{"message": "Task deleted successfully"})
 }
 
+// ArchiveTask godoc
+// @Summary      Archive a task
+// @Description  Archive a task (only the creator can archive)
+// @Tags         Tasks
+// @Accept       json
+// @Produce      json
+// @Security     Bearer
+// @Param        id   path      int  true  "Task ID"
+// @Success      200  {object}  models.Task
+// @Failure      401  {object}  map[string]string
+// @Failure      403  {object}  map[string]string
+// @Failure      404  {object}  map[string]string
+// @Failure      500  {object}  map[string]string
+// @Router       /api/tasks/{id}/archive [post]
+func (h *TaskHandler) ArchiveTask(c *gin.Context) {
+	taskID := c.Param("id")
+	userID, _ := middleware.GetUserID(c)
+
+	task, title, err := h.archiveService.ArchiveTask(taskID, userID)
+	if err != nil {
+		if err.Error() == "task not found" {
+			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+			return
+		}
+		if err.Error() == "you can only archive your own tasks" {
+			c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Log the archive action
+	h.changeLogService.CreateChangeLog(task.ID, userID, "archived", fmt.Sprintf("Archived task: %s", title))
+
+	c.JSON(http.StatusOK, task)
+}
+
+// UnarchiveTask godoc
+// @Summary      Unarchive a task
+// @Description  Restore an archived task (only the creator can unarchive)
+// @Tags         Tasks
+// @Accept       json
+// @Produce      json
+// @Security     Bearer
+// @Param        id   path      int  true  "Task ID"
+// @Success      200  {object}  models.Task
+// @Failure      401  {object}  map[string]string
+// @Failure      403  {object}  map[string]string
+// @Failure      404  {object}  map[string]string
+// @Failure      500  {object}  map[string]string
+// @Router       /api/tasks/{id}/unarchive [post]
+func (h *TaskHandler) UnarchiveTask(c *gin.Context) {
+	taskID := c.Param("id")
+	userID, _ := middleware.GetUserID(c)
+
+	task, title, err := h.archiveService.UnarchiveTask(taskID, userID)
+	if err != nil {
+		if err.Error() == "task not found" {
+			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+			return
+		}
+		if err.Error() == "you can only unarchive your own tasks" {
+			c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Log the unarchive action
+	h.changeLogService.CreateChangeLog(task.ID, userID, "unarchived", fmt.Sprintf("Restored task: %s", title))
+
+	c.JSON(http.StatusOK, task)
+}
+
+// GetArchivedTasks godoc
+// @Summary      Get archived tasks
+// @Description  Retrieve all archived tasks with creator information (supports pagination)
+// @Tags         Tasks
+// @Accept       json
+// @Produce      json
+// @Security     Bearer
+// @Param        limit   query     int  false  "Limit number of results (default: 10)"
+// @Param        offset  query     int  false  "Offset for pagination (default: 0)"
+// @Success      200  {array}   models.Task
+// @Failure      401  {object}  map[string]string
+// @Failure      500  {object}  map[string]string
+// @Router       /api/tasks/archived [get]
+func (h *TaskHandler) GetArchivedTasks(c *gin.Context) {
+	// Get pagination params
+	limit := 10
+	offset := 0
+
+	if limitStr := c.Query("limit"); limitStr != "" {
+		if l, err := strconv.Atoi(limitStr); err == nil && l > 0 {
+			limit = l
+		}
+	}
+
+	if offsetStr := c.Query("offset"); offsetStr != "" {
+		if o, err := strconv.Atoi(offsetStr); err == nil && o >= 0 {
+			offset = o
+		}
+	}
+
+	tasks, err := h.archiveService.GetArchivedTasks(limit, offset)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, tasks)
+}
+
+// GetTaskLogs godoc
+// @Summary      Get task change logs
+// @Description  Retrieve all change logs for a specific task
+// @Tags         Tasks
+// @Accept       json
+// @Produce      json
+// @Security     Bearer
+// @Param        id   path      int  true  "Task ID"
+// @Success      200  {array}   models.ChangeLog
+// @Failure      401  {object}  map[string]string
+// @Failure      500  {object}  map[string]string
+// @Router       /api/tasks/{id}/logs [get]
 func (h *TaskHandler) GetTaskLogs(c *gin.Context) {
 	taskID := c.Param("id")
 
-	rows, err := h.db.Query(`
-		SELECT cl.id, cl.task_id, cl.user_id, u.name as user_name,
-		       cl.action, cl.details, cl.created_at
-		FROM change_logs cl
-		JOIN users u ON cl.user_id = u.id
-		WHERE cl.task_id = $1
-		ORDER BY cl.created_at DESC
-	`, taskID)
+	logs, err := h.changeLogService.GetTaskLogs(taskID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch logs"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
-	}
-	defer rows.Close()
-
-	var logs []models.ChangeLog
-	for rows.Next() {
-		var log models.ChangeLog
-		err := rows.Scan(
-			&log.ID, &log.TaskID, &log.UserID, &log.UserName,
-			&log.Action, &log.Details, &log.CreatedAt,
-		)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to scan log"})
-			return
-		}
-		logs = append(logs, log)
-	}
-
-	if logs == nil {
-		logs = []models.ChangeLog{}
 	}
 
 	c.JSON(http.StatusOK, logs)
-}
-
-func (h *TaskHandler) createChangeLog(taskID, userID int, action, details string) {
-	h.db.Exec(
-		"INSERT INTO change_logs (task_id, user_id, action, details) VALUES ($1, $2, $3, $4)",
-		taskID, userID, action, details,
-	)
-}
-
-func atoi(s string) int {
-	i, _ := strconv.Atoi(s)
-	return i
 }

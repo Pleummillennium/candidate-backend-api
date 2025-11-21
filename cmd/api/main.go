@@ -83,10 +83,13 @@ func main() {
 		tasks := api.Group("/tasks")
 		{
 			tasks.GET("", taskHandler.GetTasks)
+			tasks.GET("/archived", taskHandler.GetArchivedTasks)
 			tasks.POST("", taskHandler.CreateTask)
 			tasks.GET("/:id", taskHandler.GetTask)
 			tasks.PUT("/:id", taskHandler.UpdateTask)
 			tasks.DELETE("/:id", taskHandler.DeleteTask)
+			tasks.POST("/:id/archive", taskHandler.ArchiveTask)
+			tasks.POST("/:id/unarchive", taskHandler.UnarchiveTask)
 			tasks.GET("/:id/logs", taskHandler.GetTaskLogs)
 
 			// Comment routes

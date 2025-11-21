@@ -31,19 +31,31 @@ func NewDatabase(databaseURL string) (*Database, error) {
 }
 
 func (d *Database) RunMigrations() error {
-	// Read migration file
-	migrationPath := filepath.Join("migrations", "001_init_schema.sql")
-	migrationSQL, err := os.ReadFile(migrationPath)
+	// Get all migration files
+	files, err := filepath.Glob(filepath.Join("migrations", "*.sql"))
 	if err != nil {
-		return fmt.Errorf("error reading migration file: %w", err)
+		return fmt.Errorf("error reading migration directory: %w", err)
 	}
 
-	// Execute migration
-	if _, err := d.DB.Exec(string(migrationSQL)); err != nil {
-		return fmt.Errorf("error executing migration: %w", err)
+	if len(files) == 0 {
+		return fmt.Errorf("no migration files found")
 	}
 
-	log.Println("Migrations executed successfully")
+	// Execute each migration file in order
+	for _, file := range files {
+		log.Printf("Running migration: %s", filepath.Base(file))
+
+		migrationSQL, err := os.ReadFile(file)
+		if err != nil {
+			return fmt.Errorf("error reading migration file %s: %w", file, err)
+		}
+
+		if _, err := d.DB.Exec(string(migrationSQL)); err != nil {
+			return fmt.Errorf("error executing migration %s: %w", file, err)
+		}
+	}
+
+	log.Println("All migrations executed successfully")
 	return nil
 }
 

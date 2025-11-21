@@ -18,6 +18,7 @@ type Task struct {
 	CreatorID   int        `json:"creator_id"`
 	CreatorName string     `json:"creator_name,omitempty"`
 	DueDate     *time.Time `json:"due_date,omitempty"`
+	Archived    bool       `json:"archived"`
 	CreatedAt   time.Time  `json:"created_at"`
 	UpdatedAt   time.Time  `json:"updated_at"`
 }
