@@ -4,7 +4,6 @@ import (
 	"candidate-backend/internal/middleware"
 	"candidate-backend/internal/models"
 	"database/sql"
-	"fmt"
 	"net/http"
 	"strconv"
 
