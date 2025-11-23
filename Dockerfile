@@ -1,6 +1,6 @@
 # Combined Dockerfile for API service
 # Build stage
-FROM golang:1.21-alpine AS builder
+FROM golang:1.24-alpine AS builder
 
 WORKDIR /app
 
