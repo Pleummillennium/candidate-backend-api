@@ -263,7 +263,7 @@ func (h *TaskHandler) ArchiveTask(c *gin.Context) {
 	}
 
 	// Log the archive action
-	h.changeLogService.CreateChangeLog(task.ID, userID, "archived", fmt.Sprintf("Archived task: %s", title))
+	_ = h.changeLogService.CreateChangeLog(task.ID, userID, "archived", fmt.Sprintf("Archived task: %s", title))
 
 	c.JSON(http.StatusOK, task)
 }
@@ -301,7 +301,7 @@ func (h *TaskHandler) UnarchiveTask(c *gin.Context) {
 	}
 
 	// Log the unarchive action
-	h.changeLogService.CreateChangeLog(task.ID, userID, "unarchived", fmt.Sprintf("Restored task: %s", title))
+	_ = h.changeLogService.CreateChangeLog(task.ID, userID, "unarchived", fmt.Sprintf("Restored task: %s", title))
 
 	c.JSON(http.StatusOK, task)
 }
