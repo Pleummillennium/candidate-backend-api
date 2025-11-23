@@ -128,7 +128,7 @@ func (h *CommentHandler) CreateComment(c *gin.Context) {
 
 	// Log the comment creation
 	taskIDInt, _ := strconv.Atoi(taskID)
-	h.createChangeLog(taskIDInt, userID, "commented", fmt.Sprintf("Added a comment"))
+	h.createChangeLog(taskIDInt, userID, "commented", "Added a comment")
 
 	c.JSON(http.StatusCreated, comment)
 }
@@ -257,7 +257,7 @@ func (h *CommentHandler) DeleteComment(c *gin.Context) {
 }
 
 func (h *CommentHandler) createChangeLog(taskID, userID int, action, details string) {
-	h.db.Exec(
+	_, _ = h.db.Exec(
 		"INSERT INTO change_logs (task_id, user_id, action, details) VALUES ($1, $2, $3, $4)",
 		taskID, userID, action, details,
 	)

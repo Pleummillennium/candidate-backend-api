@@ -136,7 +136,7 @@ func (h *TaskHandler) CreateTask(c *gin.Context) {
 	}
 
 	// Log the creation
-	h.changeLogService.CreateChangeLog(task.ID, userID, "created", fmt.Sprintf("Created task: %s", task.Title))
+	_ = h.changeLogService.CreateChangeLog(task.ID, userID, "created", fmt.Sprintf("Created task: %s", task.Title))
 
 	c.JSON(http.StatusCreated, task)
 }
@@ -184,7 +184,7 @@ func (h *TaskHandler) UpdateTask(c *gin.Context) {
 	// Log the update
 	if len(changes) > 0 {
 		changeDetails := h.changeLogService.FormatChangeDetails(changes)
-		h.changeLogService.CreateChangeLog(task.ID, userID, "updated", changeDetails)
+		_ = h.changeLogService.CreateChangeLog(task.ID, userID, "updated", changeDetails)
 	}
 
 	c.JSON(http.StatusOK, task)
@@ -225,7 +225,7 @@ func (h *TaskHandler) DeleteTask(c *gin.Context) {
 	}
 
 	// Log before deletion (because of CASCADE)
-	h.changeLogService.CreateChangeLog(taskIDInt, userID, "deleted", fmt.Sprintf("Deleted task: %s", title))
+	_ = h.changeLogService.CreateChangeLog(taskIDInt, userID, "deleted", fmt.Sprintf("Deleted task: %s", title))
 
 	c.JSON(http.StatusOK, gin.H{"message": "Task deleted successfully"})
 }
