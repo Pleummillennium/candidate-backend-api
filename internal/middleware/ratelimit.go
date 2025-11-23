@@ -38,7 +38,7 @@ func RateLimitMiddleware() gin.HandlerFunc {
 
 		if context.Reached {
 			resetTime := time.Unix(context.Reset, 0)
-			retryAfter := resetTime.Sub(time.Now()).Seconds()
+			retryAfter := time.Until(resetTime).Seconds()
 			if retryAfter < 0 {
 				retryAfter = 0
 			}
